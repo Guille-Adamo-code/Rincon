@@ -533,7 +533,7 @@
     </div>
   </div>
 
-  <!-- DEVOLUCIONES (CORREGIDO: RANGO DE FECHAS + PRECIO UNITARIO REAL) -->
+  <!-- DEVOLUCIONES -->
   <div id="tab-devoluciones" class="tab-content">
     <div class="card">
       <div class="card-header">🔄 Devoluciones y Cambios</div>
@@ -583,7 +583,7 @@
 
 <script>
   // ==================== CONFIGURACIÓN GLOBAL ====================
-  let GAS_URL = localStorage.getItem('rincon_gas_url') || 'https://script.google.com/macros/s/AKfycbwNixahB4ail8MnHn3KEN3LIUFhuRv5OhfBkmBwhicvWVhY_VjJ402_7CXMIdGtWwgx/exec';
+  let GAS_URL = localStorage.getItem('rincon_gas_url') || 'https://script.google.com/macros/s/AKfycbyxdt9GH_bFNslXTTkEwd5Na3drXv1T7ZGsMbBrdqUCZZ37qM_G9HIK-uIOdKx3B6goWg/exec';
   let productosGlobal = [];
   let movimientosGlobal = [];
   let currentDate = '';
@@ -645,26 +645,96 @@
     document.getElementById('devFechaHasta').value = currentDate;
   }
 
-  // ==================== COMUNICACIÓN CON SHEETS ====================
+  // ==================== GAS REQUEST MEJORADA (JSONP + fetch) ====================
   function gasRequest(action, params = {}) {
     return new Promise((resolve, reject) => {
       if (!GAS_URL) { resolve(null); return; }
+      
+      const allParams = { ...params, action, _t: Date.now() };
+      const query = new URLSearchParams(allParams).toString();
+      const url = `${GAS_URL}?${query}`;
+      
+      console.log('🔗 Intentando conectar a:', url);
+      
+      // ----- Intento 1: JSONP (más rápido) -----
       const callbackName = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
-      const timeout = setTimeout(() => { delete window[callbackName]; reject(new Error('Timeout')); }, 15000);
+      const timeout = setTimeout(() => {
+        delete window[callbackName];
+        console.warn('⏱️ Timeout JSONP, intentando con fetch...');
+        intentarFetch(url, resolve, reject);
+      }, 8000);
+      
       window[callbackName] = function(res) {
         clearTimeout(timeout);
         delete window[callbackName];
+        console.log('✅ Respuesta JSONP:', res);
         resolve(res);
       };
-      const allParams = { ...params, action, callback: callbackName, _t: Date.now() };
-      const query = new URLSearchParams(allParams).toString();
+      
       const script = document.createElement('script');
-      script.src = `${GAS_URL}?${query}`;
-      script.onerror = () => { clearTimeout(timeout); delete window[callbackName]; reject(new Error('Red')); };
+      script.src = url + '&callback=' + callbackName;
+      script.onerror = () => {
+        clearTimeout(timeout);
+        delete window[callbackName];
+        console.warn('❌ Error en script JSONP, intentando con fetch...');
+        intentarFetch(url, resolve, reject);
+      };
       document.head.appendChild(script);
+      
+      // ----- Intento 2: fetch con proxy CORS (fallback) -----
+      function intentarFetch(url, resolve, reject) {
+        // Opción A: fetch directo (puede fallar por CORS)
+        fetch(url)
+          .then(res => res.text())
+          .then(text => {
+            console.log('📡 Respuesta fetch directo:', text);
+            try {
+              const jsonMatch = text.match(/\((\{.*\})\)/s);
+              if (jsonMatch) {
+                resolve(JSON.parse(jsonMatch[1]));
+              } else {
+                resolve(JSON.parse(text));
+              }
+            } catch (e) {
+              // Opción B: proxy CORS
+              console.warn('🔄 Falló directo, usando proxy corsproxy.io...');
+              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+              fetch(proxyUrl)
+                .then(res => res.text())
+                .then(text => {
+                  console.log('📡 Respuesta proxy:', text);
+                  const jsonMatch = text.match(/\((\{.*\})\)/s);
+                  if (jsonMatch) resolve(JSON.parse(jsonMatch[1]));
+                  else reject(new Error('No se pudo parsear respuesta del proxy'));
+                })
+                .catch(err => {
+                  console.error('❌ Error con proxy:', err);
+                  reject(err);
+                });
+            }
+          })
+          .catch(err => {
+            console.error('❌ Error en fetch directo:', err);
+            // Último intento: proxy
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            fetch(proxyUrl)
+              .then(res => res.text())
+              .then(text => {
+                console.log('📡 Respuesta proxy (último intento):', text);
+                const jsonMatch = text.match(/\((\{.*\})\)/s);
+                if (jsonMatch) resolve(JSON.parse(jsonMatch[1]));
+                else reject(new Error('No se pudo parsear respuesta del proxy'));
+              })
+              .catch(err => {
+                console.error('❌ Error final:', err);
+                reject(err);
+              });
+          });
+      }
     });
   }
 
+  // ==================== COMUNICACIÓN CON SHEETS ====================
   async function cargarProductos() {
     if (!GAS_URL) { mostrarToast('Configurá la URL primero', 'err'); return; }
     mostrarToast('Cargando productos...', 'ok');
@@ -902,7 +972,6 @@
     const notas = document.getElementById('notasVenta').value;
     const hora = new Date().toLocaleTimeString('es-AR');
     
-    // --- CALCULAR PRECIO EFECTIVO POR PRODUCTO (con descuento proporcional) ---
     const factor = subtotal > 0 ? totalFinal / subtotal : 1;
     let concepto = '';
     for (let i=0;i<carrito.length;i++) {
@@ -996,7 +1065,7 @@
     } catch(e) { }
   }
 
-  // ==================== DEVOLUCIONES (CORREGIDO: PRECIO UNITARIO REAL) ====================
+  // ==================== DEVOLUCIONES ====================
   let productosCambioFiltrados = [];
 
   function actualizarListaVentas() {
@@ -1032,17 +1101,14 @@
     ventaSeleccionada = movimientosGlobal.find(m => String(m.id) === String(id));
     if (!ventaSeleccionada) return;
 
-    // Mostrar info general
     let infoHtml = `<div><strong>Venta:</strong> ${ventaSeleccionada.concepto}</div>
                     <div><strong>Monto:</strong> ${fmt(ventaSeleccionada.monto)}</div>
                     <div><strong>Notas:</strong> ${ventaSeleccionada.notas || '—'}</div>`;
     document.getElementById('devInfoVenta').innerHTML = infoHtml;
 
-    // Parsear productos extrayendo el precio unitario efectivo (@ precio)
     let productosVenta = [];
     const lineas = ventaSeleccionada.concepto.split(' + ');
     for (const linea of lineas) {
-      // Intenta capturar: "Nombre (Talle) x Cantidad @ Precio"
       let match = linea.match(/(.+?)\s*x(\d+)\s*@\s*([\d.]+)/i);
       if (match) {
         let nombre = match[1].trim();
@@ -1056,7 +1122,6 @@
         }
         productosVenta.push({ nombre, talle, cantidad, precioUnitario, codigo: '' });
       } else {
-        // Fallback para ventas antiguas sin precio unitario en el concepto
         const oldMatch = linea.match(/(.+?)\s*x(\d+)/i);
         if (oldMatch) {
           let nombre = oldMatch[1].trim();
@@ -1072,7 +1137,6 @@
       }
     }
 
-    // Si algún producto no tiene precio (legacy), calcular promedio del total
     const hasNullPrice = productosVenta.some(p => p.precioUnitario === null);
     if (hasNullPrice) {
       const totalItems = productosVenta.reduce((sum, p) => sum + p.cantidad, 0);
@@ -1083,10 +1147,8 @@
       }));
     }
 
-    // Guardar productos parseados globalmente para usarlos en el cálculo del reembolso
     window.productosVentaOriginal = productosVenta;
 
-    // Mostrar tabla de productos con precio unitario real
     let tablaHtml = `<div class="form-group"><label>Productos vendidos (precio unitario efectivo):</label></div>
                      <div class="table-container"><table class="data-table"><thead><tr><th>Producto</th><th>Talle</th><th>Cant.</th><th>Precio unit.</th><th>Subtotal</th><th>Devolver</th></tr></thead><tbody>`;
     productosVenta.forEach((p, idx) => {
@@ -1107,7 +1169,6 @@
                    <div class="total-box"><span class="total-label">Total a reembolsar (según precios unitarios reales)</span><span id="devTotalReembolso">$0</span></div>`;
     document.getElementById('devProductosLista').innerHTML = tablaHtml;
 
-    // Eventos para recalcular total
     document.querySelectorAll('.dev-check').forEach(cb => {
       cb.addEventListener('change', () => calcularTotalReembolso());
     });
@@ -1188,7 +1249,6 @@
     const cantidad = parseInt(document.getElementById(`cantNueva_${idx}`).value) || 1;
     if (cantidad < 1) return;
 
-    // Validar que no sea el mismo producto que se está devolviendo
     const productosDevueltos = [];
     document.querySelectorAll('.dev-check').forEach(cb => {
       if (cb.checked) {
@@ -1324,7 +1384,6 @@
     });
     if (!hayDevueltos) { mostrarToast('⚠️ Seleccioná al menos un producto a devolver', 'err'); return; }
 
-    // Validar que no se devuelva más de lo vendido
     for (const dev of productosDevueltos) {
       const original = window.productosVentaOriginal.find(p => p.nombre === dev.nombre && p.talle === dev.talle);
       if (original && dev.cantidad > original.cantidad) {
@@ -1337,7 +1396,6 @@
     const motivo = document.getElementById('devMotivo').value;
     const montoReembolso = parseFloat(document.getElementById('devTotalReembolso').innerText.replace('$','').replace(/\./g,'')) || 0;
 
-    // Movimiento de devolución
     const movimientoDev = {
       id: Date.now(),
       fecha: currentDate,
@@ -1367,14 +1425,12 @@
         monto: montoNuevo
       };
       movimientosGlobal.push(movimientoCambio);
-      // Restar stock de productos nuevos
       for (const item of carritoCambio) {
         const prod = productosGlobal.find(p => p.codigo === item.id);
         if (prod) prod.stock -= item.cantidad;
       }
     }
 
-    // Sumar stock de productos devueltos
     for (const item of productosDevueltos) {
       const prod = productosGlobal.find(p => p.nombre === item.nombre && p.talle === item.talle);
       if (prod) prod.stock += item.cantidad;
@@ -1410,7 +1466,6 @@
       } catch(e) { console.warn(e); }
     }
 
-    // Limpiar UI
     document.getElementById('devVentaSelect').value = '';
     document.getElementById('devInfoVenta').innerHTML = '';
     document.getElementById('devProductosLista').innerHTML = '';
