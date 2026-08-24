@@ -355,6 +355,19 @@
     .text-right { text-align: right; }
     .mt-2 { margin-top: 12px; }
     .cursor-pointer { cursor: pointer; }
+    .debug-box {
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      padding: 10px;
+      font-size: 12px;
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin-top: 10px;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -495,8 +508,10 @@
         <div class="row-2" style="margin-bottom:16px;">
           <input type="text" id="filtroProductos" placeholder="Buscar..." oninput="filtrarProductos()">
           <button class="btn-secondary" onclick="cargarProductos()">🔄 Recargar</button>
+          <button class="btn-secondary" onclick="cargarProductosDePrueba()">📦 Cargar productos de prueba</button>
         </div>
         <div class="table-container"><table class="data-table" id="tablaProductos"><thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Talle</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="tbodyProductos"></tbody></table></div>
+        <div id="debugProductos" class="debug-box"></div>
       </div>
     </div>
   </div>
@@ -583,6 +598,7 @@
 
 <script>
   // ==================== CONFIGURACIÓN GLOBAL ====================
+  // URL del Web App (ya preconfigurada con la tuya)
   let GAS_URL = localStorage.getItem('rincon_gas_url') || 'https://script.google.com/macros/s/AKfycbyxdt9GH_bFNslXTTkEwd5Na3drXv1T7ZGsMbBrdqUCZZ37qM_G9HIK-uIOdKx3B6goWg/exec';
   let productosGlobal = [];
   let movimientosGlobal = [];
@@ -590,6 +606,7 @@
   let carrito = [];
   let carritoCambio = [];
   let ventaSeleccionada = null;
+  let productosCargados = false;
 
   // ==================== AUXILIARES ====================
   function fmt(num) {
@@ -645,7 +662,7 @@
     document.getElementById('devFechaHasta').value = currentDate;
   }
 
-  // ==================== GAS REQUEST MEJORADA (JSONP + fetch) ====================
+  // ==================== GAS REQUEST MEJORADA (JSONP + fetch + proxy) ====================
   function gasRequest(action, params = {}) {
     return new Promise((resolve, reject) => {
       if (!GAS_URL) { resolve(null); return; }
@@ -738,27 +755,75 @@
   async function cargarProductos() {
     if (!GAS_URL) { mostrarToast('Configurá la URL primero', 'err'); return; }
     mostrarToast('Cargando productos...', 'ok');
+    const debugDiv = document.getElementById('debugProductos');
+    debugDiv.style.display = 'block';
+    debugDiv.innerHTML = '⏳ Solicitando productos al servidor...\n';
+    
     try {
       const data = await gasRequest('productos');
+      debugDiv.innerHTML += '📦 Respuesta del servidor:\n' + JSON.stringify(data, null, 2) + '\n';
+      
       if (data && Array.isArray(data)) {
-        productosGlobal = data.map(p => ({
-          codigo: String(p.codigo || '').trim(),
-          nombre: String(p.nombre || '').trim(),
-          categoria: String(p.categoria || '').trim(),
-          talle: String(p.talle || '').trim(),
-          precio: parsePrecio(p.precio),
-          stock: parseInt(p.stock) || 0
-        }));
-        localStorage.setItem('rincon_productos_cache', JSON.stringify(productosGlobal));
-        mostrarToast(`✅ ${productosGlobal.length} productos cargados`, 'ok');
+        if (data.length === 0) {
+          debugDiv.innerHTML += '⚠️ El servidor devolvió un array vacío. ¿La hoja "Productos" tiene datos?\n';
+          mostrarToast('⚠️ No hay productos en la hoja', 'err');
+          productosGlobal = [];
+        } else {
+          productosGlobal = data.map(p => ({
+            codigo: String(p.codigo || '').trim(),
+            nombre: String(p.nombre || '').trim(),
+            categoria: String(p.categoria || '').trim(),
+            talle: String(p.talle || '').trim(),
+            precio: parsePrecio(p.precio),
+            stock: parseInt(p.stock) || 0
+          }));
+          localStorage.setItem('rincon_productos_cache', JSON.stringify(productosGlobal));
+          mostrarToast(`✅ ${productosGlobal.length} productos cargados`, 'ok');
+          debugDiv.innerHTML += `✅ ${productosGlobal.length} productos procesados.\n`;
+          productosCargados = true;
+        }
         renderizarTablaProductos();
-      } else throw new Error('No se recibieron productos');
+      } else {
+        debugDiv.innerHTML += '❌ El servidor no devolvió un array. Data: ' + JSON.stringify(data) + '\n';
+        mostrarToast('❌ Error: no se recibieron productos', 'err');
+        // Intentar cargar desde caché
+        const cache = localStorage.getItem('rincon_productos_cache');
+        if (cache) {
+          productosGlobal = JSON.parse(cache);
+          renderizarTablaProductos();
+          debugDiv.innerHTML += '📂 Se cargaron productos desde la caché local.\n';
+          mostrarToast('📂 Productos desde caché local', 'ok');
+        }
+      }
     } catch(e) {
+      debugDiv.innerHTML += '❌ Error en la petición: ' + e.message + '\n';
       const cache = localStorage.getItem('rincon_productos_cache');
-      if (cache) productosGlobal = JSON.parse(cache);
-      mostrarToast('Modo offline - productos desde caché', 'err');
+      if (cache) {
+        productosGlobal = JSON.parse(cache);
+        renderizarTablaProductos();
+        debugDiv.innerHTML += '📂 Se cargaron productos desde la caché local (fallback).\n';
+        mostrarToast('📂 Productos desde caché local', 'ok');
+      } else {
+        mostrarToast('❌ No se pudieron cargar productos', 'err');
+        renderizarTablaProductos();
+      }
     }
+  }
+
+  // ==================== PRODUCTOS DE PRUEBA (FALLBACK) ====================
+  function cargarProductosDePrueba() {
+    productosGlobal = [
+      { codigo: 'PR001', nombre: 'Remera Manga Corta', categoria: 'Indumentaria', talle: 'M', precio: 15000, stock: 10 },
+      { codigo: 'PR002', nombre: 'Buzo Canguro', categoria: 'Indumentaria', talle: 'L', precio: 25000, stock: 8 },
+      { codigo: 'PR003', nombre: 'Short Jeans', categoria: 'Indumentaria', talle: 'S', precio: 18000, stock: 5 },
+      { codigo: 'PR004', nombre: 'Vestido de Fiesta', categoria: 'Vestidos', talle: 'M', precio: 32000, stock: 3 },
+      { codigo: 'PR005', nombre: 'Zapatillas Deportivas', categoria: 'Calzado', talle: '38', precio: 45000, stock: 6 },
+      { codigo: 'PR006', nombre: 'Gorro de Lana', categoria: 'Accesorios', talle: 'Único', precio: 8000, stock: 12 },
+    ];
+    localStorage.setItem('rincon_productos_cache', JSON.stringify(productosGlobal));
     renderizarTablaProductos();
+    mostrarToast('📦 Productos de prueba cargados (6 items)', 'ok');
+    productosCargados = true;
   }
 
   async function cargarMovimientos() {
@@ -847,6 +912,10 @@
   }
 
   function agregarAlCarrito() {
+    if (!productosGlobal.length) {
+      mostrarToast('⚠️ No hay productos cargados. Cargá productos de prueba o recargá.', 'err');
+      return;
+    }
     const codigoTalle = document.getElementById('prodTalleSelect').value;
     if (!codigoTalle) { mostrarToast('Seleccioná un talle', 'err'); return; }
     const prod = productosGlobal.find(p => p.codigo === codigoTalle);
@@ -1500,7 +1569,10 @@
 
   function renderizarTablaProductos() {
     const tbody = document.getElementById('tbodyProductos');
-    if (!productosGlobal.length) { tbody.innerHTML = '<tr><td colspan="6">Sin productos</td></tr>'; return; }
+    if (!productosGlobal.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--gray2);">📭 No hay productos cargados. Usá "Recargar" o "Cargar productos de prueba".</td></tr>';
+      return;
+    }
     tbody.innerHTML = productosGlobal.map(p => `<tr>
       <td>${p.codigo}</td>
       <td>${p.nombre}</td>
@@ -1596,16 +1668,26 @@
   function init() {
     initDate();
     const cacheProd = localStorage.getItem('rincon_productos_cache');
-    if (cacheProd) productosGlobal = JSON.parse(cacheProd);
+    if (cacheProd) {
+      try {
+        productosGlobal = JSON.parse(cacheProd);
+        if (productosGlobal.length > 0) productosCargados = true;
+      } catch(e) { productosGlobal = []; }
+    }
     const cacheMov = localStorage.getItem('rincon_movimientos_cache');
-    if (cacheMov) movimientosGlobal = JSON.parse(cacheMov);
+    if (cacheMov) {
+      try { movimientosGlobal = JSON.parse(cacheMov); } catch(e) { movimientosGlobal = []; }
+    }
     renderizarTablaProductos();
     actualizarKPICaja();
     actualizarMovimientosDia();
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
+    
+    // Cargar productos y movimientos desde el servidor
     cargarProductos();
     cargarMovimientos();
+    
     document.getElementById('configUrl').value = GAS_URL;
     document.getElementById('buscarProductoVenta').addEventListener('input', onBuscarProductoVenta);
     document.addEventListener('click', (e) => { if (!e.target.closest('#buscarProductoVenta') && !e.target.closest('#dropdownProductos')) document.getElementById('dropdownProductos').style.display = 'none'; });
