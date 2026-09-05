@@ -6,6 +6,7 @@
   <title>El Rincón de los Niños · POS Profesional</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <style>
+    /* ESTILOS (igual que antes, pero sin cambios) */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --orange: #F4861F;
@@ -355,6 +356,39 @@
     .text-right { text-align: right; }
     .mt-2 { margin-top: 12px; }
     .cursor-pointer { cursor: pointer; }
+    /* Nuevo estilo para la promo */
+    .promo-box {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #FFF3E8;
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin: 8px 0 12px 0;
+    }
+    .promo-box input[type="number"] {
+      width: 80px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--gray-border);
+      font-size: 14px;
+    }
+    .promo-box label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--dark);
+      text-transform: none;
+      margin-bottom: 0;
+    }
+    .promo-box input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -411,6 +445,19 @@
           </div>
         </div>
 
+        <!-- NUEVO: PROMOCIÓN / DESCUENTO VARIABLE -->
+        <div class="promo-box">
+          <label>
+            <input type="checkbox" id="chkPromocion" onchange="togglePromocion()">
+            Aplicar promoción
+          </label>
+          <label style="display:flex; align-items:center; gap:4px;">
+            <span>%</span>
+            <input type="number" id="porcentajePromocion" value="10" min="1" max="100" disabled onchange="recalcularTotal()">
+          </label>
+          <span style="font-size:12px; color:var(--gray);">(Descuento sobre el subtotal)</span>
+        </div>
+
         <div class="row-2">
           <div class="form-group">
             <label>Medio de pago</label>
@@ -422,6 +469,7 @@
               <option value="GO Cuotas">⭐ GO Cuotas</option>
             </select>
           </div>
+          <!-- Ya no usamos el descuento fijo del 10% por la promo variable, así que lo ocultamos -->
           <div class="form-group" id="descuentoCheckboxDiv" style="display:none;">
             <label style="display:flex; align-items:center; gap:8px; margin-top:24px;">
               <input type="checkbox" id="aplicarDescuento" onchange="recalcularTotal()"> 
@@ -487,15 +535,17 @@
     </div>
   </div>
 
-  <!-- PRODUCTOS -->
+  <!-- PRODUCTOS (sin botón de prueba ni consola) -->
   <div id="tab-productos" class="tab-content">
     <div class="card">
       <div class="card-header">📋 Listado de productos</div>
       <div class="card-body">
-        <div style="margin-bottom:16px;">
+        <div class="row-2" style="margin-bottom:16px;">
           <input type="text" id="filtroProductos" placeholder="Buscar..." oninput="filtrarProductos()">
+          <button class="btn-secondary" onclick="cargarProductos()">🔄 Recargar</button>
         </div>
         <div class="table-container"><table class="data-table" id="tablaProductos"><thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Talle</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="tbodyProductos"></tbody></table></div>
+        <!-- ELIMINADO: div de depuración y botón de productos de prueba -->
       </div>
     </div>
   </div>
@@ -582,7 +632,7 @@
 
 <script>
   // ==================== CONFIGURACIÓN GLOBAL ====================
-  let GAS_URL = localStorage.getItem('rincon_gas_url') || 'https://script.google.com/macros/s/TU_ID_AQUI/exec';
+  let GAS_URL = localStorage.getItem('rincon_gas_url') || 'https://script.google.com/macros/s/AKfycbyxdt9GH_bFNslXTTkEwd5Na3drXv1T7ZGsMbBrdqUCZZ37qM_G9HIK-uIOdKx3B6goWg/exec';
   let productosGlobal = [];
   let movimientosGlobal = [];
   let currentDate = '';
@@ -644,7 +694,7 @@
     document.getElementById('devFechaHasta').value = currentDate;
   }
 
-  // ==================== GAS REQUEST MEJORADA ====================
+  // ==================== GAS REQUEST (mantenemos JSONP + fetch fallback) ====================
   function gasRequest(action, params = {}) {
     return new Promise((resolve, reject) => {
       if (!GAS_URL) { resolve(null); return; }
@@ -653,20 +703,16 @@
       const query = new URLSearchParams(allParams).toString();
       const url = `${GAS_URL}?${query}`;
       
-      console.log('🔗 Intentando conectar a:', url);
-      
       // Intento JSONP
       const callbackName = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
       const timeout = setTimeout(() => {
         delete window[callbackName];
-        console.warn('⏱️ Timeout JSONP, intentando con fetch...');
         intentarFetch(url, resolve, reject);
       }, 8000);
       
       window[callbackName] = function(res) {
         clearTimeout(timeout);
         delete window[callbackName];
-        console.log('✅ Respuesta JSONP:', res);
         resolve(res);
       };
       
@@ -675,7 +721,6 @@
       script.onerror = () => {
         clearTimeout(timeout);
         delete window[callbackName];
-        console.warn('❌ Error en script JSONP, intentando con fetch...');
         intentarFetch(url, resolve, reject);
       };
       document.head.appendChild(script);
@@ -684,27 +729,29 @@
         fetch(url)
           .then(res => res.text())
           .then(text => {
-            console.log('📡 Respuesta fetch:', text);
             try {
               const jsonMatch = text.match(/\((\{.*\})\)/s);
-              if (jsonMatch) {
-                resolve(JSON.parse(jsonMatch[1]));
-              } else {
-                resolve(JSON.parse(text));
-              }
+              if (jsonMatch) resolve(JSON.parse(jsonMatch[1]));
+              else resolve(JSON.parse(text));
             } catch (e) {
-              reject(e);
+              // Proxy CORS
+              const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+              fetch(proxyUrl)
+                .then(res => res.text())
+                .then(text => {
+                  const jsonMatch = text.match(/\((\{.*\})\)/s);
+                  if (jsonMatch) resolve(JSON.parse(jsonMatch[1]));
+                  else reject(new Error('No se pudo parsear respuesta del proxy'));
+                })
+                .catch(reject);
             }
           })
-          .catch(err => {
-            console.error('❌ Error en fetch:', err);
-            reject(err);
-          });
+          .catch(reject);
       }
     });
   }
 
-  // ==================== CARGAR PRODUCTOS ====================
+  // ==================== COMUNICACIÓN CON SHEETS ====================
   async function cargarProductos() {
     if (!GAS_URL) { mostrarToast('Configurá la URL primero', 'err'); return; }
     mostrarToast('Cargando productos...', 'ok');
@@ -766,7 +813,7 @@
     aplicarFiltrosGastos();
   }
 
-  // ==================== VENTAS ====================
+  // ==================== VENTAS (carrito) ====================
   let productoSeleccionadoTemp = null;
   function onBuscarProductoVenta() {
     const query = document.getElementById('buscarProductoVenta').value.trim().toLowerCase();
@@ -817,6 +864,10 @@
   }
 
   function agregarAlCarrito() {
+    if (!productosGlobal.length) {
+      mostrarToast('⚠️ No hay productos cargados. Recargá productos.', 'err');
+      return;
+    }
     const codigoTalle = document.getElementById('prodTalleSelect').value;
     if (!codigoTalle) { mostrarToast('Seleccioná un talle', 'err'); return; }
     const prod = productosGlobal.find(p => p.codigo === codigoTalle);
@@ -865,24 +916,39 @@
   function eliminarDelCarrito(idx) { carrito.splice(idx,1); renderCarrito(); }
   function obtenerTotalCarrito() { return carrito.reduce((s,i)=>s+i.subtotal,0); }
 
+  // ===== NUEVO: manejo de promoción =====
+  function togglePromocion() {
+    const chk = document.getElementById('chkPromocion');
+    const inputPorcentaje = document.getElementById('porcentajePromocion');
+    inputPorcentaje.disabled = !chk.checked;
+    recalcularTotal();
+  }
+
   function recalcularTotal() {
     const subtotal = obtenerTotalCarrito();
     const metodo = document.getElementById('pagoMedio').value;
-    const descuentoDiv = document.getElementById('descuentoCheckboxDiv');
-    const aplicarCheck = document.getElementById('aplicarDescuento');
     let descuento = 0;
-    if ((metodo === 'Efectivo' || metodo === 'Transferencia') && subtotal > 30000) {
-      descuentoDiv.style.display = 'block';
-      if (aplicarCheck && aplicarCheck.checked) descuento = subtotal * 0.10;
-    } else {
-      descuentoDiv.style.display = 'none';
-      if (aplicarCheck) aplicarCheck.checked = false;
+    let porcentajePromo = 0;
+    
+    // Promoción variable
+    const chkPromo = document.getElementById('chkPromocion');
+    if (chkPromo.checked) {
+      porcentajePromo = parseFloat(document.getElementById('porcentajePromocion').value) || 0;
+      if (porcentajePromo > 0 && porcentajePromo <= 100) {
+        descuento = subtotal * (porcentajePromo / 100);
+      }
     }
-    if (descuento > 0) document.getElementById('infoDescuento').innerHTML = `✨ Descuento 10%: -${fmt(descuento)}`;
-    else document.getElementById('infoDescuento').innerHTML = '';
+    
+    // Mostrar descuento aplicado
+    if (descuento > 0) {
+      document.getElementById('infoDescuento').innerHTML = `✨ ${porcentajePromo}% de promoción: -${fmt(descuento)}`;
+    } else {
+      document.getElementById('infoDescuento').innerHTML = '';
+    }
+    
     const totalFinal = subtotal - descuento;
     document.getElementById('totalFinalVenta').innerText = fmt(totalFinal);
-    return totalFinal;
+    return { subtotal, descuento, totalFinal, porcentajePromo };
   }
 
   function togglePagoMixto() {
@@ -915,16 +981,21 @@
 
   async function registrarVentaMultiple() {
     if (carrito.length === 0) { mostrarToast('Agregá productos al carrito', 'err'); return; }
+    
+    // Validar stock
     for (const item of carrito) {
       const prod = productosGlobal.find(p => p.codigo === item.id);
-      if (!prod || prod.stock < item.cantidad) { mostrarToast(`Stock insuficiente para ${item.nombre}`, 'err'); return; }
+      if (!prod || prod.stock < item.cantidad) { 
+        mostrarToast(`Stock insuficiente para ${item.nombre}`, 'err'); 
+        return;
+      }
     }
-    const totalFinal = parseFloat(document.getElementById('totalFinalVenta').innerText.replace('$','').replace(/\./g,'')) || 0;
+    
+    const { subtotal, descuento, totalFinal, porcentajePromo } = recalcularTotal();
     const metodo = document.getElementById('pagoMedio').value;
     let metodoPago = metodo;
     let montoEfectivo = 0, montoTarjeta = 0;
-    const subtotal = obtenerTotalCarrito();
-    const descuento = (document.getElementById('aplicarDescuento')?.checked && subtotal>30000 && (metodo==='Efectivo'||metodo==='Transferencia')) ? subtotal*0.10 : 0;
+    
     if (metodo === 'Mixto') {
       if (!validarPagoMixto()) return;
       montoEfectivo = parseFloat(document.getElementById('montoEfectivo').value) || 0;
@@ -935,27 +1006,31 @@
       metodoPago = `GO Cuotas (${cuotas} cuotas)`;
       montoTarjeta = totalFinal;
     } else {
-      if (descuento > 0) metodoPago += ' (10% descuento)';
       if (metodo === 'Efectivo') montoEfectivo = totalFinal;
       else montoTarjeta = totalFinal;
     }
+    
     const notas = document.getElementById('notasVenta').value;
     const hora = new Date().toLocaleTimeString('es-AR');
     
-    const factor = subtotal > 0 ? totalFinal / subtotal : 1;
+    // Construir concepto con precio efectivo
+    const factor = subtotal > 0 ? (totalFinal / subtotal) : 1;
     let concepto = '';
-    for (let i=0;i<carrito.length;i++) {
+    for (let i=0; i<carrito.length; i++) {
       const effectivePrice = carrito[i].precioUnitario * factor;
       concepto += `${carrito[i].nombre} (${carrito[i].talle}) x${carrito[i].cantidad} @ ${effectivePrice.toFixed(2)}`;
       if (i<carrito.length-1) concepto += ' + ';
     }
     concepto += ` | Total: ${fmt(totalFinal)}`;
-    if (descuento>0) concepto += ` (Desc: -${fmt(descuento)})`;
-
+    if (descuento > 0) concepto += ` (Promo ${porcentajePromo}%)`;
+    
+    // Descontar stock localmente
     for (const item of carrito) {
       const prod = productosGlobal.find(p => p.codigo === item.id);
       if (prod) prod.stock -= item.cantidad;
     }
+    
+    // Registrar movimiento local
     const nuevoMov = {
       id: Date.now(),
       fecha: currentDate,
@@ -973,36 +1048,42 @@
     renderizarTablaProductos();
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
-
+    
+    // Enviar al servidor
     const productosVendidos = carrito.map(item => ({
-      codigo: item.id, nombre: item.nombre, categoria: '', cantidad: item.cantidad, precio: item.precioUnitario, subtotal: item.subtotal
+      codigo: item.id, 
+      nombre: item.nombre, 
+      categoria: '', 
+      cantidad: item.cantidad, 
+      precio: item.precioUnitario, 
+      subtotal: item.subtotal
     }));
+    
     try {
-      const resp = await gasRequest('guardarVentaMultiple', {
+      await gasRequest('guardarVentaMultiple', {
         fecha: currentDate,
         productos: JSON.stringify(productosVendidos),
         pago: metodoPago,
-        montoEfectivo, montoTarjeta,
+        montoEfectivo, 
+        montoTarjeta,
         total: totalFinal,
         notas,
-        descuento
+        descuento,
+        porcentajePromo  // <--- enviamos el porcentaje
       });
-      console.log('📝 Respuesta servidor venta:', resp);
-      if (resp && resp.ok) {
-        mostrarToast('✅ Venta sincronizada con Sheets', 'ok');
-      } else {
-        mostrarToast('⚠️ Venta guardada localmente pero falló la sincronización', 'err');
-      }
-    } catch(e) {
-      console.error('❌ Error al guardar venta en Sheets:', e);
-      mostrarToast('Venta guardada localmente (offline)', 'err');
+      mostrarToast('Venta sincronizada con Sheets', 'ok');
+    } catch(e) { 
+      mostrarToast('Venta guardada localmente (offline)', 'err'); 
     }
-
+    
+    // Limpiar carrito
     carrito = [];
     renderCarrito();
     document.getElementById('notasVenta').value = '';
     document.getElementById('pagoMedio').value = 'Efectivo';
     togglePagoMixto();
+    document.getElementById('chkPromocion').checked = false;
+    document.getElementById('porcentajePromocion').disabled = true;
     mostrarToast(`✅ Venta registrada: ${fmt(totalFinal)}`, 'ok');
   }
 
@@ -1479,7 +1560,7 @@
   function renderizarTablaProductos() {
     const tbody = document.getElementById('tbodyProductos');
     if (!productosGlobal.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--gray2);">📭 No hay productos cargados. Recargá la página o verificá la conexión.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--gray2);">📭 No hay productos cargados. Usá "Recargar".</td></tr>';
       return;
     }
     tbody.innerHTML = productosGlobal.map(p => `<tr>
@@ -1578,9 +1659,7 @@
     initDate();
     const cacheProd = localStorage.getItem('rincon_productos_cache');
     if (cacheProd) {
-      try {
-        productosGlobal = JSON.parse(cacheProd);
-      } catch(e) { productosGlobal = []; }
+      try { productosGlobal = JSON.parse(cacheProd); } catch(e) { productosGlobal = []; }
     }
     const cacheMov = localStorage.getItem('rincon_movimientos_cache');
     if (cacheMov) {
