@@ -6,7 +6,7 @@
   <title>El Rincón de los Niños · POS Profesional</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    /* ESTILOS (igual que antes) */
+    /* Estilos (igual que antes) */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --orange: #F4861F;
@@ -641,7 +641,6 @@
   let carrito = [];
   let carritoCambio = [];
   let ventaSeleccionada = null;
-  // Array para productos devueltos (seleccionados manualmente)
   let productosDevueltos = [];
 
   // ==================== AUXILIARES ====================
@@ -1130,7 +1129,7 @@
         fecha: currentDate,
         tipo: tipoSeleccionado,
         concepto: `${categoria}: ${concepto}`,
-        monto: monto  // positivo siempre
+        monto: monto
       });
     } catch(e) { }
   }
@@ -1159,7 +1158,6 @@
     });
   }
 
-  // Nueva función: cargar venta seleccionada y mostrar información, además de permitir agregar productos devueltos manualmente
   function cargarVentaSeleccionada() {
     const select = document.getElementById('devVentaSelect');
     const id = select.value;
@@ -1179,11 +1177,11 @@
                     <div><strong>Notas:</strong> ${ventaSeleccionada.notas || '—'}</div>`;
     document.getElementById('devInfoVenta').innerHTML = infoHtml;
 
-    // Parsear productos de la venta (solo para mostrar y para saber cantidades máximas)
+    // Parsear productos de la venta
     const productosVenta = extraerProductosDeConcepto(ventaSeleccionada.concepto);
-    window.productosVentaOriginal = productosVenta; // guardamos para referencia
+    window.productosVentaOriginal = productosVenta;
 
-    // Mostrar un selector de productos a devolver (similar al carrito de cambio)
+    // Mostrar interfaz de selección
     let tablaHtml = `
       <div class="form-group"><label>Productos vendidos (selecciona los que quieres devolver):</label></div>
       <div style="position: relative; margin-bottom: 12px;">
@@ -1195,16 +1193,14 @@
     `;
     document.getElementById('devProductosLista').innerHTML = tablaHtml;
 
-    // Inicializar lista de devueltos
     productosDevueltos = [];
     renderListaDevolver();
     calcularTotalReembolso();
   }
 
-  // Función auxiliar para parsear concepto (copiada de antes, mejorada)
+  // Función para extraer productos del concepto (mejorada)
   function extraerProductosDeConcepto(concepto) {
     let productos = [];
-    // Limpiar prefijo "VENTA:" si existe
     let limpio = concepto.replace(/^VENTA:\s*/i, '');
     const lineas = limpio.split(' + ');
     for (const linea of lineas) {
@@ -1235,9 +1231,9 @@
         }
       }
     }
-    // Si algunos precios son null, asignar promedio
+    // Asignar precios promedio si faltan
     const hasNull = productos.some(p => p.precioUnitario === null);
-    if (hasNull) {
+    if (hasNull && ventaSeleccionada) {
       const totalItems = productos.reduce((sum, p) => sum + p.cantidad, 0);
       const avgPrice = totalItems > 0 ? ventaSeleccionada.monto / totalItems : 0;
       productos = productos.map(p => ({
@@ -1248,7 +1244,37 @@
     return productos;
   }
 
-  // Buscador para productos a devolver (similar al de cambio)
+  // Normalizar nombre para comparación (quitar acentos, mayúsculas, espacios)
+  function normalizarNombre(texto) {
+    return texto.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  // Obtener cantidad máxima vendida (busca por nombre, ignora talle)
+  function getMaxVendido(nombre, talle) {
+    const productosVenta = window.productosVentaOriginal || [];
+    const nomNorm = normalizarNombre(nombre);
+    let total = 0;
+    for (const p of productosVenta) {
+      if (normalizarNombre(p.nombre) === nomNorm) {
+        total += p.cantidad;
+      }
+    }
+    return total;
+  }
+
+  // Obtener precio unitario de la venta (busca por nombre, ignora talle)
+  function getPrecioVenta(nombre, talle) {
+    const productosVenta = window.productosVentaOriginal || [];
+    const nomNorm = normalizarNombre(nombre);
+    for (const p of productosVenta) {
+      if (normalizarNombre(p.nombre) === nomNorm) {
+        return p.precioUnitario;
+      }
+    }
+    return null;
+  }
+
+  // Buscador de productos a devolver
   function buscarProductoDevolver() {
     const query = document.getElementById('devBuscarProductoDevolver').value.trim().toLowerCase();
     const dd = document.getElementById('devDropdownDevolver');
@@ -1271,16 +1297,20 @@
     dd.style.display = 'block';
   }
 
-  // Agregar un producto a la lista de devueltos
+  // Agregar producto a la lista de devueltos
   function agregarProductoDevolver(codigo) {
     const prod = productosGlobal.find(p => p.codigo === codigo);
     if (!prod) return;
 
-    // Verificar si ya está en la lista de devueltos
+    const maxVendido = getMaxVendido(prod.nombre, prod.talle);
+    if (maxVendido <= 0) {
+      mostrarToast(`❌ Este producto no aparece en la venta seleccionada`, 'err');
+      return;
+    }
+
+    // Buscar si ya está en la lista
     const existente = productosDevueltos.find(item => item.codigo === codigo);
     if (existente) {
-      // Aumentar cantidad (pero no más de la cantidad vendida)
-      const maxVendido = getMaxVendido(prod.nombre, prod.talle);
       if (existente.cantidad < maxVendido) {
         existente.cantidad++;
         existente.subtotal = existente.cantidad * existente.precioUnitario;
@@ -1289,13 +1319,6 @@
         return;
       }
     } else {
-      // Verificar que haya stock suficiente (stock actual + cantidad a devolver no supere el stock original)
-      const maxVendido = getMaxVendido(prod.nombre, prod.talle);
-      if (maxVendido <= 0) {
-        mostrarToast(`Este producto no aparece en la venta seleccionada`, 'err');
-        return;
-      }
-      // Usar precio unitario de la venta (si existe)
       const precioVenta = getPrecioVenta(prod.nombre, prod.talle) || prod.precio;
       productosDevueltos.push({
         codigo: prod.codigo,
@@ -1313,20 +1336,7 @@
     mostrarToast(`✅ ${prod.nombre} agregado a la devolución`, 'ok');
   }
 
-  // Obtener cantidad máxima vendida de ese producto en la venta
-  function getMaxVendido(nombre, talle) {
-    const productosVenta = window.productosVentaOriginal || [];
-    const encontrado = productosVenta.find(p => p.nombre === nombre && p.talle === talle);
-    return encontrado ? encontrado.cantidad : 0;
-  }
-
-  function getPrecioVenta(nombre, talle) {
-    const productosVenta = window.productosVentaOriginal || [];
-    const encontrado = productosVenta.find(p => p.nombre === nombre && p.talle === talle);
-    return encontrado ? encontrado.precioUnitario : null;
-  }
-
-  // Renderizar lista de productos devueltos
+  // Renderizar lista de devueltos
   function renderListaDevolver() {
     const container = document.getElementById('devListaDevolver');
     if (!productosDevueltos.length) {
@@ -1379,7 +1389,7 @@
     actualizarDiferencia();
   }
 
-  // ==================== CAMBIOS (sin cambios) ====================
+  // ==================== CAMBIOS ====================
   function toggleCambioPanel() {
     const tipo = document.getElementById('devTipoOperacion').value;
     const panel = document.getElementById('devCambioPanel');
@@ -1518,20 +1528,18 @@
     }
   }
 
-  // ==================== REGISTRO DE DEVOLUCIÓN (CORREGIDO) ====================
+  // ==================== REGISTRO DE DEVOLUCIÓN ====================
   async function registrarDevolucion() {
     if (!ventaSeleccionada) {
       mostrarToast('❌ Seleccioná una venta primero', 'err');
       return;
     }
 
-    // Validar que haya productos devueltos
     if (!productosDevueltos.length) {
       mostrarToast('⚠️ Agregá al menos un producto a devolver', 'err');
       return;
     }
 
-    // Calcular total reembolso
     const montoReembolso = parseFloat(document.getElementById('devTotalReembolso').innerText.replace('$','').replace(/\./g,'')) || 0;
     if (montoReembolso <= 0) {
       mostrarToast('El monto a reembolsar debe ser mayor a $0', 'err');
@@ -1541,7 +1549,7 @@
     const tipo = document.getElementById('devTipoOperacion').value;
     const motivo = document.getElementById('devMotivo').value;
 
-    // --- 1. Registrar movimiento de devolución (GASTO) ---
+    // --- 1. Registrar gasto ---
     const movimientoDev = {
       id: Date.now(),
       fecha: currentDate,
@@ -1553,7 +1561,7 @@
     };
     movimientosGlobal.push(movimientoDev);
 
-    // --- 2. Actualizar STOCK (incrementar) ---
+    // --- 2. Incrementar stock de productos devueltos ---
     let stockActualizado = false;
     let errores = [];
     for (const item of productosDevueltos) {
@@ -1564,19 +1572,16 @@
         console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) aumentado a ${prod.stock}`);
       } else {
         errores.push(item.nombre + ' (' + item.talle + ')');
-        console.warn(`⚠️ Producto no encontrado: ${item.nombre} (${item.talle})`);
       }
     }
-
     if (errores.length) {
-      // Si hay errores, no continuamos con la devolución, revertimos el gasto
       movimientosGlobal.pop();
       guardarMovimientosLocal();
-      mostrarToast(`❌ No se encontraron en el catálogo: ${errores.join(', ')}. Verificá que los productos existan.`, 'err');
+      mostrarToast(`❌ No se encontraron en el catálogo: ${errores.join(', ')}`, 'err');
       return;
     }
 
-    // --- 3. Si es cambio, procesar los productos nuevos ---
+    // --- 3. Si es cambio, registrar ingreso y descontar stock de nuevos ---
     let montoNuevo = 0;
     if (tipo === 'cambio' && carritoCambio.length > 0) {
       let detalleCambio = '';
@@ -1596,30 +1601,25 @@
       };
       movimientosGlobal.push(movimientoCambio);
 
-      // Descontar stock de los nuevos productos
       for (const item of carritoCambio) {
         const prod = productosGlobal.find(p => p.codigo === item.id);
         if (prod) {
           prod.stock -= item.cantidad;
           stockActualizado = true;
-          console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) reducido a ${prod.stock}`);
-        } else {
-          console.warn(`⚠️ Producto con código ${item.id} no encontrado para descontar stock`);
         }
       }
     }
 
-    // --- 4. Persistir cambios de stock ---
+    // --- 4. Persistir cambios ---
     if (stockActualizado) {
       guardarProductosLocal();
       if (GAS_URL) {
         try {
           await gasRequest('actualizarStock', { productos: JSON.stringify(productosGlobal) });
-        } catch (e) { console.warn('Error al sincronizar stock con GAS', e); }
+        } catch (e) { console.warn(e); }
       }
     }
 
-    // --- 5. Guardar movimientos y refrescar UI ---
     guardarMovimientosLocal();
     actualizarKPICaja();
     actualizarMovimientosDia();
@@ -1627,7 +1627,6 @@
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
 
-    // --- 6. Mensaje final ---
     const diferencia = montoNuevo - montoReembolso;
     if (tipo === 'cambio') {
       if (diferencia > 0) mostrarToast(`🔄 Cambio exitoso. Cliente debe pagar ${fmt(diferencia)}`, 'ok');
@@ -1637,7 +1636,7 @@
       mostrarToast(`✅ Devolución registrada por ${fmt(montoReembolso)}`, 'ok');
     }
 
-    // --- 7. Limpiar ---
+    // Limpiar
     document.getElementById('devVentaSelect').value = '';
     document.getElementById('devInfoVenta').innerHTML = '';
     document.getElementById('devProductosLista').innerHTML = '';
