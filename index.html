@@ -6,7 +6,7 @@
   <title>El Rincón de los Niños · POS Profesional</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    /* Estilos (igual que antes) */
+    /* ESTILOS (igual que antes) */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --orange: #F4861F;
@@ -1171,17 +1171,14 @@
     ventaSeleccionada = movimientosGlobal.find(m => String(m.id) === String(id));
     if (!ventaSeleccionada) return;
 
-    // Mostrar info de la venta
     let infoHtml = `<div><strong>Venta:</strong> ${ventaSeleccionada.concepto}</div>
                     <div><strong>Monto:</strong> ${fmt(ventaSeleccionada.monto)}</div>
                     <div><strong>Notas:</strong> ${ventaSeleccionada.notas || '—'}</div>`;
     document.getElementById('devInfoVenta').innerHTML = infoHtml;
 
-    // Parsear productos de la venta
     const productosVenta = extraerProductosDeConcepto(ventaSeleccionada.concepto);
     window.productosVentaOriginal = productosVenta;
 
-    // Mostrar interfaz de selección
     let tablaHtml = `
       <div class="form-group"><label>Productos vendidos (selecciona los que quieres devolver):</label></div>
       <div style="position: relative; margin-bottom: 12px;">
@@ -1198,7 +1195,6 @@
     calcularTotalReembolso();
   }
 
-  // Función para extraer productos del concepto (mejorada)
   function extraerProductosDeConcepto(concepto) {
     let productos = [];
     let limpio = concepto.replace(/^VENTA:\s*/i, '');
@@ -1231,7 +1227,6 @@
         }
       }
     }
-    // Asignar precios promedio si faltan
     const hasNull = productos.some(p => p.precioUnitario === null);
     if (hasNull && ventaSeleccionada) {
       const totalItems = productos.reduce((sum, p) => sum + p.cantidad, 0);
@@ -1244,12 +1239,10 @@
     return productos;
   }
 
-  // Normalizar nombre para comparación (quitar acentos, mayúsculas, espacios)
   function normalizarNombre(texto) {
     return texto.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
 
-  // Obtener cantidad máxima vendida (busca por nombre, ignora talle)
   function getMaxVendido(nombre, talle) {
     const productosVenta = window.productosVentaOriginal || [];
     const nomNorm = normalizarNombre(nombre);
@@ -1262,7 +1255,6 @@
     return total;
   }
 
-  // Obtener precio unitario de la venta (busca por nombre, ignora talle)
   function getPrecioVenta(nombre, talle) {
     const productosVenta = window.productosVentaOriginal || [];
     const nomNorm = normalizarNombre(nombre);
@@ -1274,7 +1266,6 @@
     return null;
   }
 
-  // Buscador de productos a devolver
   function buscarProductoDevolver() {
     const query = document.getElementById('devBuscarProductoDevolver').value.trim().toLowerCase();
     const dd = document.getElementById('devDropdownDevolver');
@@ -1297,7 +1288,6 @@
     dd.style.display = 'block';
   }
 
-  // Agregar producto a la lista de devueltos
   function agregarProductoDevolver(codigo) {
     const prod = productosGlobal.find(p => p.codigo === codigo);
     if (!prod) return;
@@ -1308,7 +1298,6 @@
       return;
     }
 
-    // Buscar si ya está en la lista
     const existente = productosDevueltos.find(item => item.codigo === codigo);
     if (existente) {
       if (existente.cantidad < maxVendido) {
@@ -1336,7 +1325,6 @@
     mostrarToast(`✅ ${prod.nombre} agregado a la devolución`, 'ok');
   }
 
-  // Renderizar lista de devueltos
   function renderListaDevolver() {
     const container = document.getElementById('devListaDevolver');
     if (!productosDevueltos.length) {
@@ -1429,7 +1417,6 @@
     const cantidad = parseInt(document.getElementById(`cantNueva_${idx}`).value) || 1;
     if (cantidad < 1) return;
 
-    // Validar que no sea el mismo producto que se está devolviendo
     const esMismo = productosDevueltos.some(p => p.codigo === prod.codigo);
     if (esMismo) {
       mostrarToast(`❌ No se puede cambiar por el mismo producto (${prod.nombre} ${prod.talle}).`, 'err');
@@ -1528,7 +1515,7 @@
     }
   }
 
-  // ==================== REGISTRO DE DEVOLUCIÓN ====================
+  // ==================== REGISTRO DE DEVOLUCIÓN (CORREGIDO) ====================
   async function registrarDevolucion() {
     if (!ventaSeleccionada) {
       mostrarToast('❌ Seleccioná una venta primero', 'err');
@@ -1549,7 +1536,36 @@
     const tipo = document.getElementById('devTipoOperacion').value;
     const motivo = document.getElementById('devMotivo').value;
 
-    // --- 1. Registrar gasto ---
+    // Calcular monto nuevo (si es cambio)
+    let montoNuevo = 0;
+    if (tipo === 'cambio' && carritoCambio.length > 0) {
+      montoNuevo = carritoCambio.reduce((sum, i) => sum + i.subtotal, 0);
+    }
+
+    // --- 1. Enviar a GAS primero ---
+    if (GAS_URL) {
+      try {
+        const result = await gasRequest('guardarDevolucion', {
+          fecha: currentDate,
+          tipoOperacion: tipo,
+          productosDevueltos: JSON.stringify(productosDevueltos),
+          productosNuevos: tipo === 'cambio' ? JSON.stringify(carritoCambio) : '[]',
+          montoReembolso,
+          montoNuevo,
+          motivo
+        });
+        if (!result || !result.ok) {
+          mostrarToast('❌ Error en el servidor: ' + (result?.error || 'Desconocido'), 'err');
+          return;
+        }
+      } catch (e) {
+        mostrarToast('❌ Error de conexión: ' + e.message, 'err');
+        return;
+      }
+    }
+
+    // --- 2. Si GAS fue exitoso (o no hay GAS), proceder localmente ---
+    // Registrar movimiento de devolución (GASTO) local
     const movimientoDev = {
       id: Date.now(),
       fecha: currentDate,
@@ -1561,34 +1577,24 @@
     };
     movimientosGlobal.push(movimientoDev);
 
-    // --- 2. Incrementar stock de productos devueltos ---
+    // Actualizar stock local (incrementar devueltos)
     let stockActualizado = false;
-    let errores = [];
     for (const item of productosDevueltos) {
       const prod = productosGlobal.find(p => p.codigo === item.codigo);
       if (prod) {
         prod.stock += item.cantidad;
         stockActualizado = true;
-        console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) aumentado a ${prod.stock}`);
       } else {
-        errores.push(item.nombre + ' (' + item.talle + ')');
+        mostrarToast(`⚠️ Producto ${item.nombre} no encontrado en catálogo local`, 'err');
       }
     }
-    if (errores.length) {
-      movimientosGlobal.pop();
-      guardarMovimientosLocal();
-      mostrarToast(`❌ No se encontraron en el catálogo: ${errores.join(', ')}`, 'err');
-      return;
-    }
 
-    // --- 3. Si es cambio, registrar ingreso y descontar stock de nuevos ---
-    let montoNuevo = 0;
+    // Si es cambio, registrar ingreso y descontar stock de nuevos
     if (tipo === 'cambio' && carritoCambio.length > 0) {
       let detalleCambio = '';
       for (let i=0; i<carritoCambio.length; i++) {
         detalleCambio += `${carritoCambio[i].nombre} (${carritoCambio[i].talle}) x${carritoCambio[i].cantidad}`;
         if (i<carritoCambio.length-1) detalleCambio += ' + ';
-        montoNuevo += carritoCambio[i].subtotal;
       }
       const movimientoCambio = {
         id: Date.now() + 1,
@@ -1610,14 +1616,8 @@
       }
     }
 
-    // --- 4. Persistir cambios ---
     if (stockActualizado) {
       guardarProductosLocal();
-      if (GAS_URL) {
-        try {
-          await gasRequest('actualizarStock', { productos: JSON.stringify(productosGlobal) });
-        } catch (e) { console.warn(e); }
-      }
     }
 
     guardarMovimientosLocal();
@@ -1650,7 +1650,7 @@
     window.productosVentaOriginal = [];
   }
 
-  // ==================== RENDERIZADO (sin cambios) ====================
+  // ==================== RENDERIZADO ====================
   function actualizarKPICaja() {
     const movsHoy = movimientosGlobal.filter(m => m.fecha === currentDate);
     const ingresos = movsHoy.filter(m => m.tipo === 'INGRESO').reduce((a,m)=>a+m.monto,0);
