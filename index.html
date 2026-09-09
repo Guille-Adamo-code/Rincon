@@ -1026,7 +1026,7 @@
       const prod = productosGlobal.find(p => p.codigo === item.id);
       if (prod) prod.stock -= item.cantidad;
     }
-    guardarProductosLocal(); // <--- persistimos el stock
+    guardarProductosLocal();
     
     const nuevoMov = {
       id: Date.now(),
@@ -1095,6 +1095,8 @@
     const monto = parseFloat(document.getElementById('gastoMonto').value) || 0;
     if (!concepto || monto <= 0) { mostrarToast('Complete todos los campos', 'err'); return; }
     const hora = new Date().toLocaleTimeString('es-AR');
+    
+    // Guardar localmente con signo negativo para que el balance interno funcione
     const nuevo = {
       id: Date.now(),
       fecha: currentDate,
@@ -1110,12 +1112,20 @@
     actualizarMovimientosDia();
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
+    
     document.getElementById('gastoConcepto').value = '';
     document.getElementById('gastoMonto').value = '';
     actualizarMontoGasto();
     mostrarToast(`✅ ${tipoSeleccionado === 'GASTO' ? 'Gasto' : 'Ingreso Extra'} registrado: ${fmt(monto)}`, 'ok');
+    
+    // Enviar a GAS con monto positivo y tipo (para que en Sheets se maneje con fórmula)
     try {
-      await gasRequest('guardarGasto', { fecha: currentDate, tipo: tipoSeleccionado, concepto: `${categoria}: ${concepto}`, monto: tipoSeleccionado === 'GASTO' ? -monto : monto });
+      await gasRequest('guardarGasto', {
+        fecha: currentDate,
+        tipo: tipoSeleccionado,
+        concepto: `${categoria}: ${concepto}`,
+        monto: monto  // positivo siempre
+      });
     } catch(e) { }
   }
 
@@ -1640,14 +1650,18 @@
     filtrados.sort((a,b) => (b.fecha + ' ' + (b.hora||'')).localeCompare(a.fecha + ' ' + (a.hora||'')));
     const tbody = document.getElementById('tbodyGastos');
     if (!filtrados.length) { tbody.innerHTML = '<tr><td colspan="4">No hay egresos en el rango</td></tr>'; return; }
-    tbody.innerHTML = filtrados.map(m => `
-      <tr>
-        <td>${formatearFechaMostrar(m.fecha)} ${m.hora || ''}</td>
-        <td><span class="badge badge-egreso">${m.tipo}</span></td>
-        <td>${m.concepto}</td>
-        <td style="color:var(--red)">${fmtNegativo(m.monto)}</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = filtrados.map(m => {
+      const montoAbs = Math.abs(m.monto);
+      const badgeClase = m.tipo === 'GASTO' ? 'badge-egreso' : 'badge-ingreso';
+      return `
+        <tr>
+          <td>${formatearFechaMostrar(m.fecha)} ${m.hora || ''}</td>
+          <td><span class="badge ${badgeClase}">${m.tipo}</span></td>
+          <td>${m.concepto}</td>
+          <td style="color:var(--red)">${fmt(montoAbs)}</td>
+        </tr>
+      `;
+    }).join('');
   }
 
   // ==================== CONFIGURACIÓN ====================
