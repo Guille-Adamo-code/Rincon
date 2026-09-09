@@ -1096,7 +1096,6 @@
     if (!concepto || monto <= 0) { mostrarToast('Complete todos los campos', 'err'); return; }
     const hora = new Date().toLocaleTimeString('es-AR');
     
-    // Guardar localmente con signo negativo para que el balance interno funcione
     const nuevo = {
       id: Date.now(),
       fecha: currentDate,
@@ -1118,7 +1117,6 @@
     actualizarMontoGasto();
     mostrarToast(`✅ ${tipoSeleccionado === 'GASTO' ? 'Gasto' : 'Ingreso Extra'} registrado: ${fmt(monto)}`, 'ok');
     
-    // Enviar a GAS con monto positivo y tipo (para que en Sheets se maneje con fórmula)
     try {
       await gasRequest('guardarGasto', {
         fecha: currentDate,
@@ -1457,6 +1455,7 @@
       return;
     }
 
+    // Validar que no se devuelva más de lo vendido
     for (const dev of productosDevueltos) {
       const original = window.productosVentaOriginal.find(p => p.nombre === dev.nombre && p.talle === dev.talle);
       if (original && dev.cantidad > original.cantidad) {
@@ -1481,21 +1480,40 @@
     };
     movimientosGlobal.push(movimientoDev);
 
-    // --- 2. Actualizar STOCK de los productos devueltos (búsqueda insensible) ---
+    // --- 2. Actualizar STOCK de los productos devueltos (búsqueda robusta) ---
     let stockActualizado = false;
+    let productosNoEncontrados = [];
+
     for (const item of productosDevueltos) {
-      const prod = productosGlobal.find(p =>
+      // Buscar por nombre y talle (ignorando mayúsculas y espacios)
+      let prod = productosGlobal.find(p =>
         p.nombre.trim().toLowerCase() === item.nombre.trim().toLowerCase() &&
         p.talle.trim().toLowerCase() === item.talle.trim().toLowerCase()
       );
+
+      // Si no se encuentra y tenemos código, buscar por código
+      if (!prod && item.codigo) {
+        prod = productosGlobal.find(p => p.codigo === item.codigo);
+      }
+
       if (prod) {
         prod.stock += item.cantidad;
         stockActualizado = true;
         console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) aumentado a ${prod.stock}`);
       } else {
-        console.warn(`⚠️ Producto no encontrado en stock: ${item.nombre} (${item.talle})`);
-        mostrarToast(`⚠️ Producto "${item.nombre} (${item.talle})" no existe en el catálogo actual`, 'err');
+        productosNoEncontrados.push(`${item.nombre} (${item.talle})`);
+        console.warn(`⚠️ Producto no encontrado: ${item.nombre} (${item.talle})`);
       }
+    }
+
+    // Si hay productos no encontrados, mostramos error y cancelamos la operación
+    if (productosNoEncontrados.length > 0) {
+      const mensaje = `❌ No se encontraron en el catálogo: ${productosNoEncontrados.join(', ')}. Revisá los nombres y talles.`;
+      mostrarToast(mensaje, 'err');
+      // Eliminamos el gasto que ya registramos para no dejar inconsistencias
+      movimientosGlobal.pop();
+      guardarMovimientosLocal();
+      return;
     }
 
     // --- 3. Si es cambio, procesar los productos nuevos ---
@@ -1534,10 +1552,13 @@
     // --- 4. Persistir los cambios de stock ---
     if (stockActualizado) {
       guardarProductosLocal();
+      // Sincronizar con GAS (opcional)
       if (GAS_URL) {
         try {
           await gasRequest('actualizarStock', { productos: JSON.stringify(productosGlobal) });
-        } catch (e) { console.warn('Error al sincronizar stock con GAS', e); }
+        } catch (e) {
+          console.warn('Error al sincronizar stock con GAS (no afecta el stock local)', e);
+        }
       }
     }
 
