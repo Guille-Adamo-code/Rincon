@@ -6,7 +6,7 @@
   <title>El Rincón de los Niños · POS Profesional</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    /* ESTILOS (igual que antes, pero sin cambios) */
+    /* ESTILOS (igual que antes) */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --orange: #F4861F;
@@ -356,7 +356,6 @@
     .text-right { text-align: right; }
     .mt-2 { margin-top: 12px; }
     .cursor-pointer { cursor: pointer; }
-    /* Nuevo estilo para la promo */
     .promo-box {
       display: flex;
       align-items: center;
@@ -445,7 +444,6 @@
           </div>
         </div>
 
-        <!-- NUEVO: PROMOCIÓN / DESCUENTO VARIABLE -->
         <div class="promo-box">
           <label>
             <input type="checkbox" id="chkPromocion" onchange="togglePromocion()">
@@ -469,7 +467,6 @@
               <option value="GO Cuotas">⭐ GO Cuotas</option>
             </select>
           </div>
-          <!-- Ya no usamos el descuento fijo del 10% por la promo variable, así que lo ocultamos -->
           <div class="form-group" id="descuentoCheckboxDiv" style="display:none;">
             <label style="display:flex; align-items:center; gap:8px; margin-top:24px;">
               <input type="checkbox" id="aplicarDescuento" onchange="recalcularTotal()"> 
@@ -535,7 +532,7 @@
     </div>
   </div>
 
-  <!-- PRODUCTOS (sin botón de prueba ni consola) -->
+  <!-- PRODUCTOS -->
   <div id="tab-productos" class="tab-content">
     <div class="card">
       <div class="card-header">📋 Listado de productos</div>
@@ -545,7 +542,6 @@
           <button class="btn-secondary" onclick="cargarProductos()">🔄 Recargar</button>
         </div>
         <div class="table-container"><table class="data-table" id="tablaProductos"><thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Talle</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="tbodyProductos"></tbody></table></div>
-        <!-- ELIMINADO: div de depuración y botón de productos de prueba -->
       </div>
     </div>
   </div>
@@ -694,7 +690,7 @@
     document.getElementById('devFechaHasta').value = currentDate;
   }
 
-  // ==================== GAS REQUEST (mantenemos JSONP + fetch fallback) ====================
+  // ==================== GAS REQUEST ====================
   function gasRequest(action, params = {}) {
     return new Promise((resolve, reject) => {
       if (!GAS_URL) { resolve(null); return; }
@@ -703,7 +699,6 @@
       const query = new URLSearchParams(allParams).toString();
       const url = `${GAS_URL}?${query}`;
       
-      // Intento JSONP
       const callbackName = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
       const timeout = setTimeout(() => {
         delete window[callbackName];
@@ -734,7 +729,6 @@
               if (jsonMatch) resolve(JSON.parse(jsonMatch[1]));
               else resolve(JSON.parse(text));
             } catch (e) {
-              // Proxy CORS
               const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
               fetch(proxyUrl)
                 .then(res => res.text())
@@ -811,6 +805,15 @@
     actualizarMovimientosDia();
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
+  }
+
+  // ==================== PERSISTENCIA LOCAL ====================
+  function guardarProductosLocal() {
+    localStorage.setItem('rincon_productos_cache', JSON.stringify(productosGlobal));
+  }
+
+  function guardarMovimientosLocal() {
+    localStorage.setItem('rincon_movimientos_cache', JSON.stringify(movimientosGlobal));
   }
 
   // ==================== VENTAS (carrito) ====================
@@ -916,7 +919,6 @@
   function eliminarDelCarrito(idx) { carrito.splice(idx,1); renderCarrito(); }
   function obtenerTotalCarrito() { return carrito.reduce((s,i)=>s+i.subtotal,0); }
 
-  // ===== NUEVO: manejo de promoción =====
   function togglePromocion() {
     const chk = document.getElementById('chkPromocion');
     const inputPorcentaje = document.getElementById('porcentajePromocion');
@@ -930,7 +932,6 @@
     let descuento = 0;
     let porcentajePromo = 0;
     
-    // Promoción variable
     const chkPromo = document.getElementById('chkPromocion');
     if (chkPromo.checked) {
       porcentajePromo = parseFloat(document.getElementById('porcentajePromocion').value) || 0;
@@ -939,7 +940,6 @@
       }
     }
     
-    // Mostrar descuento aplicado
     if (descuento > 0) {
       document.getElementById('infoDescuento').innerHTML = `✨ ${porcentajePromo}% de promoción: -${fmt(descuento)}`;
     } else {
@@ -982,7 +982,6 @@
   async function registrarVentaMultiple() {
     if (carrito.length === 0) { mostrarToast('Agregá productos al carrito', 'err'); return; }
     
-    // Validar stock
     for (const item of carrito) {
       const prod = productosGlobal.find(p => p.codigo === item.id);
       if (!prod || prod.stock < item.cantidad) { 
@@ -1013,7 +1012,6 @@
     const notas = document.getElementById('notasVenta').value;
     const hora = new Date().toLocaleTimeString('es-AR');
     
-    // Construir concepto con precio efectivo
     const factor = subtotal > 0 ? (totalFinal / subtotal) : 1;
     let concepto = '';
     for (let i=0; i<carrito.length; i++) {
@@ -1024,13 +1022,12 @@
     concepto += ` | Total: ${fmt(totalFinal)}`;
     if (descuento > 0) concepto += ` (Promo ${porcentajePromo}%)`;
     
-    // Descontar stock localmente
     for (const item of carrito) {
       const prod = productosGlobal.find(p => p.codigo === item.id);
       if (prod) prod.stock -= item.cantidad;
     }
+    guardarProductosLocal(); // <--- persistimos el stock
     
-    // Registrar movimiento local
     const nuevoMov = {
       id: Date.now(),
       fecha: currentDate,
@@ -1049,7 +1046,6 @@
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
     
-    // Enviar al servidor
     const productosVendidos = carrito.map(item => ({
       codigo: item.id, 
       nombre: item.nombre, 
@@ -1069,14 +1065,13 @@
         total: totalFinal,
         notas,
         descuento,
-        porcentajePromo  // <--- enviamos el porcentaje
+        porcentajePromo
       });
       mostrarToast('Venta sincronizada con Sheets', 'ok');
     } catch(e) { 
       mostrarToast('Venta guardada localmente (offline)', 'err'); 
     }
     
-    // Limpiar carrito
     carrito = [];
     renderCarrito();
     document.getElementById('notasVenta').value = '';
@@ -1417,11 +1412,16 @@
     }
   }
 
+  // ==================== FUNCIÓN CORREGIDA DE DEVOLUCIÓN ====================
   async function registrarDevolucion() {
-    if (!ventaSeleccionada) { mostrarToast('❌ Seleccioná una venta primero', 'err'); return; }
+    if (!ventaSeleccionada) {
+      mostrarToast('❌ Seleccioná una venta primero', 'err');
+      return;
+    }
 
     const productosDevueltos = [];
     let hayDevueltos = false;
+
     document.querySelectorAll('.dev-check').forEach(cb => {
       if (cb.checked) {
         const idx = parseInt(cb.dataset.idx);
@@ -1435,13 +1435,17 @@
               nombre: p.nombre,
               talle: p.talle,
               cantidad: cantidad,
-              codigo: p.codigo || '?'
+              codigo: p.codigo || ''
             });
           }
         }
       }
     });
-    if (!hayDevueltos) { mostrarToast('⚠️ Seleccioná al menos un producto a devolver', 'err'); return; }
+
+    if (!hayDevueltos) {
+      mostrarToast('⚠️ Seleccioná al menos un producto a devolver', 'err');
+      return;
+    }
 
     for (const dev of productosDevueltos) {
       const original = window.productosVentaOriginal.find(p => p.nombre === dev.nombre && p.talle === dev.talle);
@@ -1455,6 +1459,7 @@
     const motivo = document.getElementById('devMotivo').value;
     const montoReembolso = parseFloat(document.getElementById('devTotalReembolso').innerText.replace('$','').replace(/\./g,'')) || 0;
 
+    // --- 1. Registrar movimiento de devolución (GASTO) ---
     const movimientoDev = {
       id: Date.now(),
       fecha: currentDate,
@@ -1466,6 +1471,24 @@
     };
     movimientosGlobal.push(movimientoDev);
 
+    // --- 2. Actualizar STOCK de los productos devueltos (búsqueda insensible) ---
+    let stockActualizado = false;
+    for (const item of productosDevueltos) {
+      const prod = productosGlobal.find(p =>
+        p.nombre.trim().toLowerCase() === item.nombre.trim().toLowerCase() &&
+        p.talle.trim().toLowerCase() === item.talle.trim().toLowerCase()
+      );
+      if (prod) {
+        prod.stock += item.cantidad;
+        stockActualizado = true;
+        console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) aumentado a ${prod.stock}`);
+      } else {
+        console.warn(`⚠️ Producto no encontrado en stock: ${item.nombre} (${item.talle})`);
+        mostrarToast(`⚠️ Producto "${item.nombre} (${item.talle})" no existe en el catálogo actual`, 'err');
+      }
+    }
+
+    // --- 3. Si es cambio, procesar los productos nuevos ---
     let montoNuevo = 0;
     if (tipo === 'cambio' && carritoCambio.length > 0) {
       let detalleCambio = '';
@@ -1484,17 +1507,31 @@
         monto: montoNuevo
       };
       movimientosGlobal.push(movimientoCambio);
+
+      // Descontar stock de los nuevos productos
       for (const item of carritoCambio) {
         const prod = productosGlobal.find(p => p.codigo === item.id);
-        if (prod) prod.stock -= item.cantidad;
+        if (prod) {
+          prod.stock -= item.cantidad;
+          stockActualizado = true;
+          console.log(`✅ Stock de ${prod.nombre} (${prod.talle}) reducido a ${prod.stock}`);
+        } else {
+          console.warn(`⚠️ Producto con código ${item.id} no encontrado para descontar stock`);
+        }
       }
     }
 
-    for (const item of productosDevueltos) {
-      const prod = productosGlobal.find(p => p.nombre === item.nombre && p.talle === item.talle);
-      if (prod) prod.stock += item.cantidad;
+    // --- 4. Persistir los cambios de stock ---
+    if (stockActualizado) {
+      guardarProductosLocal();
+      if (GAS_URL) {
+        try {
+          await gasRequest('actualizarStock', { productos: JSON.stringify(productosGlobal) });
+        } catch (e) { console.warn('Error al sincronizar stock con GAS', e); }
+      }
     }
 
+    // --- 5. Guardar movimientos y refrescar la UI ---
     guardarMovimientosLocal();
     actualizarKPICaja();
     actualizarMovimientosDia();
@@ -1502,6 +1539,7 @@
     aplicarFiltrosHistorial();
     aplicarFiltrosGastos();
 
+    // --- 6. Mensaje final ---
     const diferencia = montoNuevo - montoReembolso;
     if (tipo === 'cambio') {
       if (diferencia > 0) mostrarToast(`🔄 Cambio exitoso. Cliente debe pagar ${fmt(diferencia)}`, 'ok');
@@ -1511,20 +1549,7 @@
       mostrarToast(`✅ Devolución registrada por ${fmt(montoReembolso)}`, 'ok');
     }
 
-    if (GAS_URL) {
-      try {
-        await gasRequest('guardarDevolucion', {
-          fecha: currentDate,
-          tipoOperacion: tipo,
-          productosDevueltos: JSON.stringify(productosDevueltos),
-          productosNuevos: tipo === 'cambio' ? JSON.stringify(carritoCambio) : '[]',
-          montoReembolso,
-          montoNuevo,
-          motivo
-        });
-      } catch(e) { console.warn(e); }
-    }
-
+    // --- 7. Limpiar el formulario ---
     document.getElementById('devVentaSelect').value = '';
     document.getElementById('devInfoVenta').innerHTML = '';
     document.getElementById('devProductosLista').innerHTML = '';
@@ -1623,10 +1648,6 @@
         <td style="color:var(--red)">${fmtNegativo(m.monto)}</td>
       </tr>
     `).join('');
-  }
-
-  function guardarMovimientosLocal() {
-    localStorage.setItem('rincon_movimientos_cache', JSON.stringify(movimientosGlobal));
   }
 
   // ==================== CONFIGURACIÓN ====================
